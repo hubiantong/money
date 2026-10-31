@@ -221,7 +221,8 @@ fun EmailImportScreen(container: AppContainer, onBack: () -> Unit) {
             if (state.candidates.isEmpty()) {
                 item { EmptyState("还没有收到账单邮件，可先手动导入") }
             } else {
-                items(state.candidates, key = { it.id }) { candidate ->
+                // 候选与日志是两个表，自增 id 会重复，key 必须加前缀
+                items(state.candidates, key = { "candidate-${it.id}" }) { candidate ->
                     CandidateCard(candidate, onPassword = viewModel::requestPassword)
                 }
             }
@@ -276,7 +277,7 @@ fun EmailImportScreen(container: AppContainer, onBack: () -> Unit) {
             if (state.logs.isEmpty()) {
                 item { EmptyState("暂无导入记录") }
             } else {
-                items(state.logs, key = { it.id }) { log ->
+                items(state.logs, key = { "log-${it.id}" }) { log ->
                     ImportLogRow(log)
                 }
             }

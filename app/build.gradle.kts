@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -14,19 +16,43 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = "0.01"
         vectorDrawables { useSupportLibrary = true }
+    }
+
+    // 签名信息从根目录 keystore.properties 读取（该文件与 release.jks 均已被 .gitignore 忽略）
+    val keystorePropsFile = rootProject.file("keystore.properties")
+    val keystoreProps = Properties().apply {
+        if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+    }
+
+    signingConfigs {
+        if (keystorePropsFile.exists()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (keystorePropsFile.exists()) signingConfig = signingConfigs.getByName("release")
         }
     }
 
     buildFeatures {
         compose = true
+    }
+
+    lint {
+        // AGP 8.7.3 自带 lint 与 lifecycle 2.9.4 的 lint 检测器不兼容
+        // （NonNullableMutableLiveDataDetector 抛 IncompatibleClassChangeError），打包 release 时跳过。
+        checkReleaseBuilds = false
     }
 
     compileOptions {
@@ -59,6 +85,9 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("androidx.activity:activity-compose:1.10.1")
+    // activity 1.10 的 requestCode 从 65536 起分配；fragment 1.2.5 的 FragmentActivity 会拒绝，
+    // 导致 rememberLauncherForActivityResult 启动即崩，需使用放宽了校验的新版 fragment。
+    implementation("androidx.fragment:fragment:1.8.9")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
     implementation("androidx.navigation:navigation-compose:2.9.0")

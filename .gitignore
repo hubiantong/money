@@ -1,4 +1,5 @@
 .gradle/
+.kotlin/
 build/
 local.properties
 .idea/
@@ -8,3 +9,10 @@ captures/
 .DS_Store
 .trae/
 *.eml
+
+# 签名密钥与证书（敏感度最高，防将来误提交）
+*.jks
+*.keystore
+*.p12
+*.pem
+keystore.properties

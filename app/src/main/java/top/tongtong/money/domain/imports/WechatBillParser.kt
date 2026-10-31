@@ -3,9 +3,12 @@ package top.tongtong.money.domain.imports
 import top.tongtong.money.data.local.TxDirection
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.floor
+import kotlin.math.roundToLong
 
 data class ParsedBillRow(
     val occurredAt: Long,
@@ -33,6 +36,7 @@ object WechatBillParser {
     private val dateTime = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.US)
     private val dateTimeNoSeconds = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.US)
     private val amountClean = Regex("""[¥￥,，\u00A0元\s]""")
+    private val excelEpoch = LocalDate.of(1899, 12, 30)
 
     data class ColumnMap(
         val time: Int,
@@ -145,6 +149,18 @@ object WechatBillParser {
 
     private fun parseTime(value: String): Long? {
         val normalized = value.replace('/', '-').trim()
+        // 微信导出的 xlsx 里「交易时间」可能被存成 Excel 日期序列号（如 46326.5166），
+        // 直接按 yyyy-MM-dd HH:mm:ss 解析会得到 null，导致所有行被跳过。
+        val serial = normalized.toDoubleOrNull()
+        if (serial != null && serial > 20_000.0) {
+            val days = floor(serial).toLong()
+            val millisOfDay = ((serial - days) * 86_400_000.0).roundToLong()
+            return excelEpoch.plusDays(days)
+                .atStartOfDay(zone)
+                .plusNanos(millisOfDay * 1_000_000L)
+                .toInstant()
+                .toEpochMilli()
+        }
         return runCatching {
             LocalDateTime.parse(normalized, dateTime).atZone(zone).toInstant().toEpochMilli()
         }.recoverCatching {

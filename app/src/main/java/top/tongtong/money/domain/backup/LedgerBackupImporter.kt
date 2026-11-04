@@ -12,6 +12,8 @@ data class ParsedBackupCategory(
     val quotaCents: Long?,
     val periodType: PeriodType,
     val feeBp: Int,
+    /** 旧备份没有该字段，回退到 0（历史行为：同类抵扣不收手续费）。 */
+    val sameFeeBp: Int,
     val isSystem: Boolean,
     val archived: Boolean,
     val sortOrder: Int,
@@ -32,6 +34,7 @@ data class ParsedBackupTransaction(
     val rawType: String,
     val payMethod: String,
     val status: String,
+    val surplusSourcePrefs: String,
     val createdAt: Long,
 )
 
@@ -95,6 +98,7 @@ object LedgerBackupImporter {
             quotaCents = asLong(map["quotaCents"]),
             periodType = parseEnum(map["periodType"], PeriodType.values()),
             feeBp = asLong(map["feeBp"])?.toInt()?.coerceIn(0, 10_000) ?: 1000,
+            sameFeeBp = asLong(map["sameFeeBp"])?.toInt()?.coerceIn(0, 10_000) ?: 0,
             isSystem = map["isSystem"] == true,
             archived = map["archived"] == true,
             sortOrder = asLong(map["sortOrder"])?.toInt() ?: 0,
@@ -120,6 +124,7 @@ object LedgerBackupImporter {
             rawType = map["rawType"] as? String ?: "",
             payMethod = map["payMethod"] as? String ?: "",
             status = map["status"] as? String ?: "",
+            surplusSourcePrefs = map["surplusSourcePrefs"] as? String ?: "",
             createdAt = asLong(map["createdAt"]) ?: occurredAt,
         )
     }

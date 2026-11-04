@@ -10,7 +10,7 @@ enum class TxDirection { EXPENSE, INCOME, REFUND, NEUTRAL }
 
 enum class TxSource { MANUAL, WECHAT }
 
-enum class SavingsType { SURPLUS_ROLLOVER, MONTHLY_QUOTA_ROLLOVER, CROSS_FEE }
+enum class SavingsType { SURPLUS_ROLLOVER, MONTHLY_QUOTA_ROLLOVER, CROSS_FEE, SAME_FEE }
 
 enum class CandidateStatus { PENDING_PASSWORD, READY, IMPORTED, EXPIRED, FAILED }
 
@@ -27,7 +27,10 @@ data class CategoryEntity(
     val colorArgb: Long = 0xFFF06B6BL,
     val quotaCents: Long? = null,
     val periodType: PeriodType = PeriodType.MONTHLY,
+    /** 跨类结余抵扣手续费（基点）。 */
     val feeBp: Int = 1000,
+    /** 同类结余抵扣手续费（基点），默认 1%。 */
+    val sameFeeBp: Int = 100,
     val isSystem: Boolean = false,
     val archived: Boolean = false,
     val sortOrder: Int = 0,
@@ -59,6 +62,8 @@ data class TransactionEntity(
     val rawType: String = "",
     val payMethod: String = "",
     val status: String = "",
+    /** 手动指定超额资金来源，编码为 `categoryId:sourcePeriodStart`，逗号分隔；空串表示自动抵扣。 */
+    val surplusSourcePrefs: String = "",
     val overLimit: Boolean = false,
     val quotaCoveredCents: Long = 0,
     val sameSurplusCents: Long = 0,

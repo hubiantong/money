@@ -4,6 +4,7 @@ import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.text.format.DateFormat
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -38,14 +40,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import top.tongtong.money.data.local.TxDirection
+import top.tongtong.money.data.repo.SurplusSourceOption
 import top.tongtong.money.di.AppContainer
 import top.tongtong.money.domain.ledger.ExpenseAllocation
+import top.tongtong.money.domain.ledger.SurplusSourceRef
 import top.tongtong.money.ui.appViewModel
 import top.tongtong.money.ui.components.Divider
 import top.tongtong.money.ui.components.InfoRow
@@ -202,6 +206,48 @@ fun AddTransactionScreen(
                 }
             }
 
+            if (state.direction == TxDirection.EXPENSE && state.surplusSources.isNotEmpty()) {
+                Column {
+                    Text("超额资金来源", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "不勾选时按默认顺序自动抵扣；勾选后只使用所选来源，同类抵扣费率更低。",
+                        color = Muted,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    state.surplusSources.forEach { option ->
+                        val ref = SurplusSourceRef(option.categoryId, option.sourcePeriodStart)
+                        val checked = state.selectedSources.contains(ref)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.toggleSurplusSource(ref) }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = checked,
+                                onCheckedChange = { viewModel.toggleSurplusSource(ref) },
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "${option.categoryEmoji} ${option.categoryName}" +
+                                        if (option.sameCategory) "（同类）" else "（跨类）",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    text = "${sourcePeriodLabel(option, zone)} · 剩余 " +
+                                        formatCents(option.remainingCents),
+                                    color = Muted,
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             Column {
                 Text("时间", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
@@ -308,14 +354,16 @@ fun AddTransactionScreen(
             }
 
             if (state.direction == TxDirection.EXPENSE) {
-                state.preview?.let { PreviewCard(it) }
+                state.preview?.let {
+                    PreviewCard(allocation = it, manualSources = state.selectedSources.isNotEmpty())
+                }
             }
         }
     }
 }
 
 @Composable
-private fun PreviewCard(allocation: ExpenseAllocation) {
+private fun PreviewCard(allocation: ExpenseAllocation, manualSources: Boolean) {
     MoneyCard(
         containerColor = if (allocation.overLimit) DangerBackground else MaterialTheme.colorScheme.surface,
     ) {
@@ -325,12 +373,27 @@ private fun PreviewCard(allocation: ExpenseAllocation) {
             fontWeight = FontWeight.SemiBold,
         )
         Spacer(Modifier.height(4.dp))
+        if (manualSources) {
+            Text(
+                "按已勾选的资金来源抵扣",
+                color = Muted,
+                style = MaterialTheme.typography.labelMedium,
+            )
+            Spacer(Modifier.height(4.dp))
+        }
         InfoRow("配额抵扣", formatCents(allocation.quotaCoveredCents))
-        InfoRow("同类结余抵扣", formatCents(allocation.sameSurplusCents))
+        InfoRow(
+            "同类结余抵扣",
+            if (allocation.sameSurplusCents > 0 && allocation.sameFeeCents > 0) {
+                "${formatCents(allocation.sameSurplusCents)}（手续费 ${formatCents(allocation.sameFeeCents)}）"
+            } else {
+                formatCents(allocation.sameSurplusCents)
+            },
+        )
         InfoRow(
             "跨类结余抵扣",
             if (allocation.crossSurplusCents > 0) {
-                "${formatCents(allocation.crossSurplusCents)}（手续费 ${formatCents(allocation.feeCents)}）"
+                "${formatCents(allocation.crossSurplusCents)}（手续费 ${formatCents(allocation.crossFeeCents)}）"
             } else {
                 formatCents(0)
             },
@@ -350,5 +413,15 @@ private fun PreviewCard(allocation: ExpenseAllocation) {
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
+    }
+}
+
+private fun sourcePeriodLabel(option: SurplusSourceOption, zone: ZoneId): String {
+    val start = Instant.ofEpochMilli(option.sourcePeriodStart).atZone(zone).toLocalDate()
+    val end = Instant.ofEpochMilli(option.sourcePeriodEnd - 1).atZone(zone).toLocalDate()
+    return if (start == end) {
+        "${start.monthValue}月${start.dayOfMonth}日"
+    } else {
+        "${start.monthValue}月${start.dayOfMonth}日-${end.monthValue}月${end.dayOfMonth}日"
     }
 }

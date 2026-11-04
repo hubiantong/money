@@ -40,6 +40,7 @@ data class CategoryEditUiState(
     val periodType: PeriodType = PeriodType.MONTHLY,
     val quotaText: String = "",
     val feePercentText: String = "10",
+    val sameFeePercentText: String = "1",
     val existing: CategoryEntity? = null,
     val loaded: Boolean = false,
     val saved: Boolean = false,
@@ -76,6 +77,7 @@ class CategoryEditViewModel(
                         periodType = category.periodType,
                         quotaText = centsToPlainYuan(category.quotaCents),
                         feePercentText = percentText(category.feeBp),
+                        sameFeePercentText = percentText(category.sameFeeBp),
                         existing = category,
                         loaded = true,
                     )
@@ -112,6 +114,10 @@ class CategoryEditViewModel(
         _state.update { it.copy(feePercentText = value, error = null) }
     }
 
+    fun setSameFeePercentText(value: String) {
+        _state.update { it.copy(sameFeePercentText = value, error = null) }
+    }
+
     fun save() {
         val snapshot = _state.value
         // 加载完成前保存会把(target)分类当成新建，必须拦住；同时防止重复点击
@@ -134,6 +140,11 @@ class CategoryEditViewModel(
             _state.update { it.copy(error = "手续费率应在 0% - 100% 之间") }
             return
         }
+        val sameFeeBp = feeBpFromPercent(snapshot.sameFeePercentText)
+        if (sameFeeBp == null) {
+            _state.update { it.copy(error = "同类手续费率应在 0% - 100% 之间") }
+            return
+        }
         _state.update { it.copy(saving = true) }
         viewModelScope.launch {
             try {
@@ -148,6 +159,7 @@ class CategoryEditViewModel(
                     quotaCents = quota,
                     periodType = snapshot.periodType,
                     feeBp = feeBp,
+                    sameFeeBp = sameFeeBp,
                     isSystem = existing?.isSystem ?: false,
                     archived = existing?.archived ?: false,
                     sortOrder = nextSortOrder,

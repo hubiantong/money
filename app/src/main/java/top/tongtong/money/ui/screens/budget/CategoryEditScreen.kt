@@ -208,6 +208,16 @@ fun CategoryEditScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             )
 
+            OutlinedTextField(
+                value = state.sameFeePercentText,
+                onValueChange = viewModel::setSameFeePercentText,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("同类结余抵扣手续费（%）") },
+                supportingText = { Text("本分类的结余抵扣本类消费时按此比例扣费，通常低于跨类费率") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            )
+
             state.error?.let { message ->
                 Text(message, color = Danger, style = MaterialTheme.typography.bodyMedium)
             }

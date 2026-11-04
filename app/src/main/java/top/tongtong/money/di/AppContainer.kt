@@ -13,12 +13,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import top.tongtong.money.data.local.AppDatabase
+import top.tongtong.money.data.local.MIGRATION_1_2
 import top.tongtong.money.data.prefs.SecureStore
 import top.tongtong.money.data.prefs.SettingsRepository
 import top.tongtong.money.data.repo.BackupRepository
 import top.tongtong.money.data.repo.CategoryRepository
 import top.tongtong.money.data.repo.ImportRepository
 import top.tongtong.money.data.repo.LedgerRepository
+import top.tongtong.money.data.repo.UpdateRepository
 import top.tongtong.money.domain.imports.BillDownloader
 import top.tongtong.money.domain.imports.BillImportService
 import top.tongtong.money.domain.imports.ImapMailClient
@@ -38,7 +40,7 @@ class AppContainer(context: Context) {
         appContext,
         AppDatabase::class.java,
         "money.db",
-    ).build()
+    ).addMigrations(MIGRATION_1_2).build()
 
     val settingsRepository = SettingsRepository(appContext)
     val secureStore = SecureStore(appContext)
@@ -67,12 +69,19 @@ class AppContainer(context: Context) {
         ledgerRepository = ledgerRepository,
         settingsRepository = settingsRepository,
     )
+    val updateRepository = UpdateRepository(
+        context = appContext,
+        settingsRepository = settingsRepository,
+    )
 
     init {
         scope.launch {
             runCatching { categoryRepository.seedDefaults() }
                 .onFailure { if (it is CancellationException) throw it }
             runCatching { ledgerRepository.catchUp() }
+                .onFailure { if (it is CancellationException) throw it }
+            // 24 小时节流由仓库内部处理；失败不影响应用启动
+            runCatching { updateRepository.autoCheck() }
                 .onFailure { if (it is CancellationException) throw it }
         }
     }

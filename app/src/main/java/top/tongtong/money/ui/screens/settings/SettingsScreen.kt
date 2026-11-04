@@ -36,6 +36,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
+import top.tongtong.money.data.repo.UpdateState
 import top.tongtong.money.di.AppContainer
 import top.tongtong.money.ui.appViewModel
 import top.tongtong.money.ui.components.Divider
@@ -170,6 +171,51 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 }
             }
 
+            SectionTitle("应用更新")
+            MoneyCard {
+                val update = state.updateState
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("当前版本 v$versionName", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = updateStatusText(update),
+                            color = Muted,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                    when (update) {
+                        is UpdateState.Available -> Button(onClick = viewModel::downloadUpdate) {
+                            Text("下载更新")
+                        }
+                        is UpdateState.Ready -> Button(onClick = viewModel::installUpdate) {
+                            Text("安装更新")
+                        }
+                        is UpdateState.Checking, is UpdateState.Downloading -> Unit
+                        else -> Button(onClick = viewModel::checkUpdate) {
+                            Text(if (update is UpdateState.Failed) "重试" else "检查更新")
+                        }
+                    }
+                }
+                if (update is UpdateState.Available && update.manifest.notes.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        update.manifest.notes,
+                        color = Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                if (update is UpdateState.Failed) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(update.message, color = Danger, style = MaterialTheme.typography.bodyMedium)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "更新包从 GitHub Releases 下载，安装前会校验 SHA-256；不会上传任何账本数据。",
+                    color = Muted,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+
             SectionTitle("关于")
             MoneyCard {
                 InfoRow("应用版本", versionName)
@@ -181,7 +227,7 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 InfoRow("数据存储", "仅保存在本机")
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "所有周期结束后剩余的可用结余、月配额剩余，以及跨类消费手续费，都会自动转入储蓄账户累计。",
+                    "所有周期结束后剩余的可用结余、月配额剩余，以及同类/跨类抵扣手续费，都会自动转入储蓄账户累计。",
                     color = Muted,
                     style = MaterialTheme.typography.labelMedium,
                 )
@@ -199,6 +245,16 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
             },
         )
     }
+}
+
+private fun updateStatusText(update: UpdateState): String = when (update) {
+    is UpdateState.Idle -> "尚未检查更新"
+    is UpdateState.Checking -> "正在检查更新…"
+    is UpdateState.UpToDate -> "已是最新版本"
+    is UpdateState.Available -> "发现新版本 v${update.manifest.versionName}"
+    is UpdateState.Downloading -> "正在下载 v${update.manifest.versionName}…"
+    is UpdateState.Ready -> "v${update.manifest.versionName} 已下载，可以安装"
+    is UpdateState.Failed -> "检查/下载失败"
 }
 
 @Composable

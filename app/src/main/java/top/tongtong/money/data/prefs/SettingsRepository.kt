@@ -43,6 +43,8 @@ data class UserSettings(
     val biometricEnabled: Boolean = false,
     val rememberZipPassword: Boolean = false,
     val onboardingDone: Boolean = false,
+    /** 上次成功检查更新的时间；0 表示从未检查。 */
+    val updateLastCheck: Long = 0,
 )
 
 class SettingsRepository(private val context: Context) {
@@ -65,6 +67,7 @@ class SettingsRepository(private val context: Context) {
         val biometric = booleanPreferencesKey("biometric_enabled")
         val rememberZip = booleanPreferencesKey("remember_zip_password")
         val onboardingDone = booleanPreferencesKey("onboarding_done")
+        val updateLastCheck = longPreferencesKey("update_last_check")
     }
 
     /** 最近一次成功读取的设置：读取抖动时用它兜底，避免应用锁状态被静默重置。 */
@@ -91,6 +94,7 @@ class SettingsRepository(private val context: Context) {
                 biometricEnabled = prefs[Keys.biometric] ?: false,
                 rememberZipPassword = prefs[Keys.rememberZip] ?: false,
                 onboardingDone = prefs[Keys.onboardingDone] ?: false,
+                updateLastCheck = prefs[Keys.updateLastCheck] ?: 0,
             )
         }
         .onEach { settings -> lastGood = settings }
@@ -167,6 +171,10 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setOnboardingDone(done: Boolean) {
         context.dataStore.edit { it[Keys.onboardingDone] = done }
+    }
+
+    suspend fun setUpdateLastCheck(at: Long) {
+        context.dataStore.edit { it[Keys.updateLastCheck] = at }
     }
 
     /** 清空全部设置恢复默认值，仅用于"忘记 PIN → 清空重置"。 */

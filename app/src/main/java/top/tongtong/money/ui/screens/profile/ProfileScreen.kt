@@ -168,7 +168,7 @@ fun ProfileScreen(
                     ProfileRow(
                         emoji = "🏦",
                         title = "储蓄账户",
-                        subtitle = "结余结转与跨类手续费明细",
+                        subtitle = "结余结转与跨类/同类手续费明细",
                         onClick = onOpenSavings,
                     )
                     Divider(Modifier.padding(horizontal = 16.dp))
@@ -191,6 +191,7 @@ fun ProfileScreen(
                         emoji = "🔒",
                         title = "设置与安全",
                         subtitle = if (state.lockEnabled) "应用锁已开启" else "应用锁未开启",
+                        badge = state.updateVersionName?.let { "v$it" },
                         onClick = onOpenSettings,
                     )
                     Divider(Modifier.padding(horizontal = 16.dp))

@@ -70,6 +70,7 @@ class CategoryRepository(
                 previous.quotaCents != category.quotaCents ||
                 previous.periodType != category.periodType ||
                 previous.feeBp != category.feeBp ||
+                previous.sameFeeBp != category.sameFeeBp ||
                 previous.createdAt != category.createdAt ||
                 previous.archived != category.archived
             db.categoryDao().update(category)

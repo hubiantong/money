@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.tongtong.money.data.local.CandidateStatus
 import top.tongtong.money.data.repo.BackupPreview
+import top.tongtong.money.data.repo.UpdateState
 import top.tongtong.money.di.AppContainer
 import top.tongtong.money.domain.backup.LedgerBackupExporter
 import top.tongtong.money.domain.backup.LedgerBackupImporter
@@ -36,6 +37,8 @@ data class ProfileUiState(
     val pendingImports: Int = 0,
     val emailEnabled: Boolean = false,
     val lockEnabled: Boolean = false,
+    /** 有新版本可更新时的版本号，用于"设置"入口角标。 */
+    val updateVersionName: String? = null,
     val exportRunning: Boolean = false,
     val restorePreview: BackupPreview? = null,
     val restoring: Boolean = false,
@@ -97,7 +100,8 @@ class ProfileViewModel(private val container: AppContainer) : ViewModel() {
         clock,
         exportState,
         restoreState,
-    ) { current, monthKey, export, restore ->
+        container.updateRepository.state,
+    ) { current, monthKey, export, restore, update ->
         current.copy(
             monthKey = monthKey,
             exportRunning = export.running,
@@ -105,6 +109,11 @@ class ProfileViewModel(private val container: AppContainer) : ViewModel() {
             restoring = restore.running,
             backupMessage = export.message,
             backupError = export.error,
+            updateVersionName = when (update) {
+                is UpdateState.Available -> update.manifest.versionName
+                is UpdateState.Ready -> update.manifest.versionName
+                else -> null
+            },
         )
     }.retryWhen { _, _ ->
         // 上游异常（如 DataStore/Room 读取失败）后延迟重试，避免状态流被永久取消

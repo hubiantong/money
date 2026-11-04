@@ -73,6 +73,19 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE dedupKey = :dedupKey LIMIT 1")
     suspend fun findByDedupKey(dedupKey: String): TransactionEntity?
 
+    /** 导入查重：命中同方向、同金额的手动记录，时间窗口由调用方进一步判断。 */
+    @Query(
+        "SELECT * FROM transactions WHERE source = 'MANUAL' AND direction = :direction " +
+            "AND amountCents = :amountCents AND occurredAt >= :from AND occurredAt <= :to " +
+            "ORDER BY occurredAt ASC, id ASC",
+    )
+    suspend fun findManualCandidates(
+        direction: String,
+        amountCents: Long,
+        from: Long,
+        to: Long,
+    ): List<TransactionEntity>
+
     /** 备份恢复时对无单号/无指纹的手动交易做内容指纹查重。 */
     @Query(
         "SELECT * FROM transactions WHERE occurredAt = :occurredAt AND amountCents = :amountCents " +

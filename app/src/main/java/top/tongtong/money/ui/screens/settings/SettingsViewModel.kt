@@ -15,6 +15,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.tongtong.money.data.prefs.LockManager
 import top.tongtong.money.data.prefs.SettingsRepository
+import top.tongtong.money.data.repo.InstallResult
+import top.tongtong.money.data.repo.UpdateRepository
+import top.tongtong.money.data.repo.UpdateState
 import top.tongtong.money.di.AppContainer
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -24,6 +27,7 @@ data class SettingsUiState(
     val pinSet: Boolean = false,
     val biometricEnabled: Boolean = false,
     val defaultFeeBp: Int = 1000,
+    val updateState: UpdateState = UpdateState.Idle,
     val error: String? = null,
     val message: String? = null,
 ) {
@@ -42,6 +46,7 @@ private const val PIN_COOLDOWN_MILLIS = 30_000L
 class SettingsViewModel(container: AppContainer) : ViewModel() {
 
     private val settingsRepository: SettingsRepository = container.settingsRepository
+    private val updateRepository: UpdateRepository = container.updateRepository
     private val feedback = MutableStateFlow<Feedback?>(null)
     private var oldPinFailures = 0
     private var pinCooldownUntil = 0L
@@ -49,12 +54,14 @@ class SettingsViewModel(container: AppContainer) : ViewModel() {
     val state: StateFlow<SettingsUiState> = combine(
         settingsRepository.flow,
         feedback,
-    ) { settings, current ->
+        updateRepository.state,
+    ) { settings, current, update ->
         SettingsUiState(
             lockEnabled = settings.lockEnabled,
             pinSet = settings.pinHash.isNotBlank(),
             biometricEnabled = settings.biometricEnabled,
             defaultFeeBp = settings.defaultFeeBp,
+            updateState = update,
             error = current?.takeIf { it.isError }?.text,
             message = current?.takeIf { !it.isError }?.text,
         )
@@ -183,5 +190,31 @@ class SettingsViewModel(container: AppContainer) : ViewModel() {
 
     fun clearFeedback() {
         feedback.value = null
+    }
+
+    fun checkUpdate() {
+        feedback.value = null
+        viewModelScope.launch {
+            updateRepository.check()
+        }
+    }
+
+    fun downloadUpdate() {
+        val manifest = (updateRepository.state.value as? UpdateState.Available)?.manifest ?: return
+        viewModelScope.launch {
+            updateRepository.download(manifest)
+        }
+    }
+
+    fun installUpdate() {
+        val ready = updateRepository.state.value as? UpdateState.Ready ?: return
+        when (updateRepository.install(ready.filePath)) {
+            InstallResult.NEEDS_PERMISSION -> {
+                updateRepository.openInstallPermissionSettings()
+                feedback.value = Feedback("请允许本应用安装未知来源应用后再点安装", true)
+            }
+            InstallResult.FAILED -> feedback.value = Feedback("无法启动安装器，请重试", true)
+            InstallResult.LAUNCHED -> Unit
+        }
     }
 }

@@ -16,8 +16,11 @@ import top.tongtong.money.data.local.TxDirection
 import top.tongtong.money.data.local.TxSource
 import top.tongtong.money.data.repo.CategoryRepository
 import top.tongtong.money.data.repo.LedgerRepository
+import top.tongtong.money.data.repo.SurplusSourceOption
 import top.tongtong.money.di.AppContainer
 import top.tongtong.money.domain.ledger.ExpenseAllocation
+import top.tongtong.money.domain.ledger.SurplusSourcePrefs
+import top.tongtong.money.domain.ledger.SurplusSourceRef
 import top.tongtong.money.ui.components.parseYuanToCents
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -33,6 +36,8 @@ data class AddTransactionUiState(
     val payMethod: String = "",
     val note: String = "",
     val rememberMerchant: Boolean = false,
+    val surplusSources: List<SurplusSourceOption> = emptyList(),
+    val selectedSources: List<SurplusSourceRef> = emptyList(),
     val preview: ExpenseAllocation? = null,
     val editing: Boolean = false,
     val saving: Boolean = false,
@@ -54,6 +59,7 @@ class AddTransactionViewModel(
 
     private var original: TransactionEntity? = null
     private var previewJob: Job? = null
+    private var sourcesJob: Job? = null
     // 返回确认的基线：新增时取首次分类加载后的状态，编辑时取原记录，避免"未做任何修改也弹确认"
     private var baseline: AddTransactionUiState? = null
 
@@ -92,6 +98,21 @@ class AddTransactionViewModel(
             _state.value.categories.firstOrNull { it.id == categoryId }
                 ?: db.categoryDao().getById(categoryId)
         }
+        // 先在加载时收敛一次来源：已不可用的来源若留到保存后才被引擎忽略，
+        // 会让"没改动也弹放弃确认"的基线判断失真。
+        val decodedSources = SurplusSourcePrefs.decode(transaction.surplusSourcePrefs)
+        val availableOptions = transaction.categoryId?.let { categoryId ->
+            runCatching {
+                ledger.availableSurplusSources(
+                    categoryId = categoryId,
+                    occurredAt = transaction.occurredAt,
+                    excludeTransactionId = transaction.id,
+                )
+            }.getOrNull()
+        }.orEmpty()
+        val availableRefs = availableOptions
+            .map { SurplusSourceRef(it.categoryId, it.sourcePeriodStart) }
+            .toSet()
         _state.update {
             it.copy(
                 amountText = centsToYuan(transaction.amountCents),
@@ -101,6 +122,8 @@ class AddTransactionViewModel(
                 merchant = transaction.merchant,
                 payMethod = transaction.payMethod,
                 note = transaction.note,
+                surplusSources = availableOptions,
+                selectedSources = decodedSources.filter { ref -> ref in availableRefs },
                 editing = true,
                 categories = if (editingCategory != null &&
                     it.categories.none { category -> category.id == editingCategory.id }
@@ -150,6 +173,16 @@ class AddTransactionViewModel(
         _state.update { it.copy(rememberMerchant = remember) }
     }
 
+    /** 勾选/取消一条超额资金来源；勾选顺序即抵扣顺序。 */
+    fun toggleSurplusSource(ref: SurplusSourceRef) {
+        _state.update { current ->
+            val selected = current.selectedSources.toMutableList()
+            if (!selected.remove(ref)) selected.add(ref)
+            current.copy(selectedSources = selected)
+        }
+        schedulePreview()
+    }
+
     /** 是否有相对基线的未保存修改；基线尚未就绪（记录加载中）视为未修改 */
     fun isDirty(snapshot: AddTransactionUiState): Boolean {
         val baseline = this.baseline ?: return false
@@ -160,7 +193,9 @@ class AddTransactionViewModel(
             snapshot.merchant != baseline.merchant ||
             snapshot.payMethod != baseline.payMethod ||
             snapshot.note != baseline.note ||
-            snapshot.rememberMerchant != baseline.rememberMerchant
+            snapshot.rememberMerchant != baseline.rememberMerchant ||
+            SurplusSourcePrefs.encode(snapshot.selectedSources) !=
+            SurplusSourcePrefs.encode(baseline.selectedSources)
     }
 
     fun save() {
@@ -199,6 +234,7 @@ class AddTransactionViewModel(
                     rawType = base?.rawType ?: "",
                     payMethod = snapshot.payMethod.trim(),
                     status = base?.status ?: "",
+                    surplusSourcePrefs = SurplusSourcePrefs.encode(snapshot.selectedSources),
                 )
                 if (base == null) {
                     ledger.addTransaction(entity)
@@ -225,9 +261,43 @@ class AddTransactionViewModel(
 
     private fun schedulePreview() {
         previewJob?.cancel()
+        sourcesJob?.cancel()
         val snapshot = _state.value
+        if (snapshot.direction != TxDirection.EXPENSE) {
+            _state.update {
+                it.copy(preview = null, surplusSources = emptyList(), selectedSources = emptyList())
+            }
+            return
+        }
+        val categoryId = snapshot.categoryId
+        if (categoryId != null) {
+            // 可用来源与金额无关，单独加载，避免每次改金额都重算整月账本
+            sourcesJob = viewModelScope.launch {
+                delay(120)
+                val options = runCatching {
+                    ledger.availableSurplusSources(
+                        categoryId = categoryId,
+                        occurredAt = snapshot.occurredAt,
+                        excludeTransactionId = original?.id,
+                    )
+                }.getOrNull() ?: return@launch
+                _state.update { current ->
+                    val available = options
+                        .map { SurplusSourceRef(it.categoryId, it.sourcePeriodStart) }
+                        .toSet()
+                    current.copy(
+                        surplusSources = options,
+                        // 来源已不可用时同步取消勾选，避免留下看不见的选项
+                        selectedSources = current.selectedSources.filter { it in available },
+                    )
+                }
+            }
+        } else {
+            _state.update { it.copy(surplusSources = emptyList()) }
+        }
+
         val amount = parseYuanToCents(snapshot.amountText)
-        if (snapshot.direction != TxDirection.EXPENSE || amount == null || snapshot.categoryId == null) {
+        if (amount == null || categoryId == null) {
             _state.update { it.copy(preview = null) }
             return
         }
@@ -235,10 +305,12 @@ class AddTransactionViewModel(
             delay(220)
             val allocation = runCatching {
                 ledger.previewExpense(
-                    categoryId = snapshot.categoryId,
+                    categoryId = categoryId,
                     amountCents = amount,
                     occurredAt = snapshot.occurredAt,
                     merchant = snapshot.merchant,
+                    selectedSources = snapshot.selectedSources,
+                    excludeTransactionId = original?.id,
                 )
             }.getOrNull()
             _state.update { it.copy(preview = allocation) }

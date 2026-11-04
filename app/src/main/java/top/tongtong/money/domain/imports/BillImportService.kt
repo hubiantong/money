@@ -159,6 +159,13 @@ class BillImportService(
                     categorizer.categorize(row.merchant, row.product, fallback.id)
                 }
                 val dedupKey = if (row.externalId == null) contentKey(row, digest) else null
+                // 手动记账可能早于账单导入：命中时把账单单号挂到手动记录上，保留用户填写的分类/备注
+                val manual = findManualDuplicate(row)
+                if (manual != null) {
+                    linkManual(manual, row.externalId, dedupKey, now)
+                    duplicates++
+                    continue
+                }
                 val entity = TransactionEntity(
                     externalId = row.externalId,
                     dedupKey = dedupKey,
@@ -211,6 +218,40 @@ class BillImportService(
             earliestAt = earliest,
             latestAt = latest,
             skippedNeutral = neutral,
+        )
+    }
+
+    /** 查找与导入行匹配的手动记账（同方向同金额，时间窗口见 [ManualDuplicateMatcher]）。 */
+    private suspend fun findManualDuplicate(row: ParsedBillRow): TransactionEntity? {
+        val window = ManualDuplicateMatcher.SIMILAR_WINDOW_MILLIS
+        val candidates = db.transactionDao().findManualCandidates(
+            direction = row.direction.name,
+            amountCents = row.amountCents,
+            from = row.occurredAt - window,
+            to = row.occurredAt + window,
+        )
+        // 已挂过单号/内容指纹的手动记录不再是"纯手动"来源，避免同一笔被反复认领
+        return candidates.firstOrNull {
+            it.externalId == null && it.dedupKey == null && ManualDuplicateMatcher.isDuplicate(row, it)
+        }
+    }
+
+    /** 把账单单号/内容指纹写到手动记录上，后续重复导入由唯一索引自动拦截。 */
+    private suspend fun linkManual(
+        manual: TransactionEntity,
+        importedExternalId: String?,
+        dedupKey: String?,
+        now: Long,
+    ) {
+        val externalId = importedExternalId?.takeIf { db.transactionDao().findByExternalId(it) == null }
+        val fingerprint = dedupKey?.takeIf { db.transactionDao().findByDedupKey(it) == null }
+        if (externalId == null && fingerprint == null) return
+        db.transactionDao().update(
+            manual.copy(
+                externalId = externalId ?: manual.externalId,
+                dedupKey = fingerprint ?: manual.dedupKey,
+                updatedAt = now,
+            ),
         )
     }
 

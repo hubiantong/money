@@ -18,7 +18,10 @@ data class ExpenseAllocation(
     val quotaCoveredCents: Long = 0,
     val sameSurplusCents: Long = 0,
     val crossSurplusCents: Long = 0,
+    /** 手续费合计（sameFeeCents + crossFeeCents），与交易表 feeCents 一致。 */
     val feeCents: Long = 0,
+    val sameFeeCents: Long = 0,
+    val crossFeeCents: Long = 0,
     val uncoveredCents: Long = 0,
 )
 
@@ -282,64 +285,129 @@ class LedgerEngine(
         var remainder = tx.amountCents - covered
         var same = 0L
         var cross = 0L
-        var fee = 0L
+        var sameFee = 0L
+        var crossFee = 0L
 
-        val candidates = grants
-            .filter {
-                it.monthKey == bucket.monthKey &&
-                    it.remainingCents > 0 &&
-                    it.expiresAt > tx.occurredAt
-            }
-            .sortedWith(compareBy<MutableGrant> { it.expiresAt }.thenBy { it.sourcePeriodStart }.thenBy { it.categoryId })
-
-        for (grant in candidates) {
-            if (remainder <= 0) break
-            if (grant.categoryId != category.id) continue
-            val take = minOf(remainder, grant.remainingCents)
-            if (take <= 0) continue
-            grant.remainingCents -= take
-            remainder -= take
-            same += take
-            usages += SurplusUsageEntity(
-                transactionId = tx.id,
-                grantCategoryId = grant.categoryId,
-                grantSourcePeriodStart = grant.sourcePeriodStart,
-                amountCents = take,
-                feeCents = 0,
-                crossCategory = false,
-                monthKey = bucket.monthKey,
-                createdAt = tx.occurredAt,
-            )
+        val monthlyGrants = grants.filter {
+            it.monthKey == bucket.monthKey &&
+                it.remainingCents > 0 &&
+                it.expiresAt > tx.occurredAt
         }
+        val selected = SurplusSourcePrefs.decode(tx.surplusSourcePrefs)
 
-        for (grant in candidates) {
-            if (remainder <= 0) break
-            if (grant.categoryId == category.id) continue
-            val take = minOf(remainder, grant.remainingCents)
-            if (take <= 0) continue
-            val grantFee = feeFor(take, category.feeBp)
-            grant.remainingCents -= take
-            remainder -= take
-            cross += take
-            fee += grantFee
-            usages += SurplusUsageEntity(
-                transactionId = tx.id,
-                grantCategoryId = grant.categoryId,
-                grantSourcePeriodStart = grant.sourcePeriodStart,
-                amountCents = take,
-                feeCents = grantFee,
-                crossCategory = true,
-                monthKey = bucket.monthKey,
-                createdAt = tx.occurredAt,
-            )
-            if (grantFee > 0) {
-                savings += SavingsEntryEntity(
-                    type = SavingsType.CROSS_FEE,
-                    amountCents = grantFee,
+        if (selected.isNotEmpty()) {
+            // 手动指定来源：严格按用户勾选顺序抵扣；勾选的来源已不可用时跳过，绝不自动兜底
+            for (ref in selected) {
+                if (remainder <= 0) break
+                val grant = monthlyGrants.firstOrNull {
+                    it.categoryId == ref.categoryId &&
+                        it.sourcePeriodStart == ref.sourcePeriodStart &&
+                        it.remainingCents > 0
+                } ?: continue
+                val take = minOf(remainder, grant.remainingCents)
+                if (take <= 0) continue
+                val isSame = grant.categoryId == category.id
+                val grantFee = feeFor(take, if (isSame) category.sameFeeBp else category.feeBp)
+                grant.remainingCents -= take
+                remainder -= take
+                if (isSame) {
+                    same += take
+                    sameFee += grantFee
+                } else {
+                    cross += take
+                    crossFee += grantFee
+                }
+                usages += SurplusUsageEntity(
+                    transactionId = tx.id,
+                    grantCategoryId = grant.categoryId,
+                    grantSourcePeriodStart = grant.sourcePeriodStart,
+                    amountCents = take,
+                    feeCents = grantFee,
+                    crossCategory = !isSame,
                     monthKey = bucket.monthKey,
-                    note = "跨类抵扣手续费：${categoryName(grant.categoryId)} → ${category.name}",
                     createdAt = tx.occurredAt,
                 )
+                if (grantFee > 0) {
+                    savings += SavingsEntryEntity(
+                        type = if (isSame) SavingsType.SAME_FEE else SavingsType.CROSS_FEE,
+                        amountCents = grantFee,
+                        monthKey = bucket.monthKey,
+                        note = if (isSame) {
+                            "同类抵扣手续费：${categoryName(grant.categoryId)}"
+                        } else {
+                            "跨类抵扣手续费：${categoryName(grant.categoryId)} → ${category.name}"
+                        },
+                        createdAt = tx.occurredAt,
+                    )
+                }
+            }
+        } else {
+            // 未指定来源：默认先同类、后跨类；同类按更低的 sameFeeBp 计费
+            val candidates = monthlyGrants.sortedWith(
+                compareBy<MutableGrant> { it.expiresAt }
+                    .thenBy { it.sourcePeriodStart }
+                    .thenBy { it.categoryId },
+            )
+            for (grant in candidates) {
+                if (remainder <= 0) break
+                if (grant.categoryId != category.id) continue
+                val take = minOf(remainder, grant.remainingCents)
+                if (take <= 0) continue
+                val grantFee = feeFor(take, category.sameFeeBp)
+                grant.remainingCents -= take
+                remainder -= take
+                same += take
+                sameFee += grantFee
+                usages += SurplusUsageEntity(
+                    transactionId = tx.id,
+                    grantCategoryId = grant.categoryId,
+                    grantSourcePeriodStart = grant.sourcePeriodStart,
+                    amountCents = take,
+                    feeCents = grantFee,
+                    crossCategory = false,
+                    monthKey = bucket.monthKey,
+                    createdAt = tx.occurredAt,
+                )
+                if (grantFee > 0) {
+                    savings += SavingsEntryEntity(
+                        type = SavingsType.SAME_FEE,
+                        amountCents = grantFee,
+                        monthKey = bucket.monthKey,
+                        note = "同类抵扣手续费：${categoryName(grant.categoryId)}",
+                        createdAt = tx.occurredAt,
+                    )
+                }
+            }
+
+            for (grant in candidates) {
+                if (remainder <= 0) break
+                if (grant.categoryId == category.id) continue
+                val take = minOf(remainder, grant.remainingCents)
+                if (take <= 0) continue
+                val grantFee = feeFor(take, category.feeBp)
+                grant.remainingCents -= take
+                remainder -= take
+                cross += take
+                crossFee += grantFee
+                usages += SurplusUsageEntity(
+                    transactionId = tx.id,
+                    grantCategoryId = grant.categoryId,
+                    grantSourcePeriodStart = grant.sourcePeriodStart,
+                    amountCents = take,
+                    feeCents = grantFee,
+                    crossCategory = true,
+                    monthKey = bucket.monthKey,
+                    createdAt = tx.occurredAt,
+                )
+                if (grantFee > 0) {
+                    savings += SavingsEntryEntity(
+                        type = SavingsType.CROSS_FEE,
+                        amountCents = grantFee,
+                        monthKey = bucket.monthKey,
+                        note = "跨类抵扣手续费：${categoryName(grant.categoryId)} → ${category.name}",
+                        createdAt = tx.occurredAt,
+                    )
+                }
             }
         }
 
@@ -350,7 +418,9 @@ class LedgerEngine(
             quotaCoveredCents = covered,
             sameSurplusCents = same,
             crossSurplusCents = cross,
-            feeCents = fee,
+            feeCents = sameFee + crossFee,
+            sameFeeCents = sameFee,
+            crossFeeCents = crossFee,
             uncoveredCents = remainder,
         )
     }

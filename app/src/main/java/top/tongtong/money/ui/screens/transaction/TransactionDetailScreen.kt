@@ -188,7 +188,7 @@ fun TransactionDetailScreen(
                     InfoRow("配额抵扣", formatCents(transaction.quotaCoveredCents))
                     InfoRow("同类结余", formatCents(transaction.sameSurplusCents))
                     InfoRow("跨类结余", formatCents(transaction.crossSurplusCents))
-                    InfoRow("跨类手续费", formatCents(transaction.feeCents))
+                    InfoRow("抵扣手续费", formatCents(transaction.feeCents))
                     InfoRow(
                         "未抵扣（超支）",
                         formatCents(transaction.uncoveredCents),

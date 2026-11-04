@@ -39,6 +39,7 @@ object LedgerBackupExporter {
             append("\"quotaCents\":").append(category.quotaCents ?: "null").append(",")
             append("\"periodType\":").append(json(category.periodType.name)).append(",")
             append("\"feeBp\":").append(category.feeBp).append(",")
+            append("\"sameFeeBp\":").append(category.sameFeeBp).append(",")
             append("\"isSystem\":").append(category.isSystem).append(",")
             append("\"archived\":").append(category.archived).append(",")
             append("\"sortOrder\":").append(category.sortOrder).append(",")
@@ -63,6 +64,7 @@ object LedgerBackupExporter {
             append("\"rawType\":").append(json(tx.rawType)).append(",")
             append("\"payMethod\":").append(json(tx.payMethod)).append(",")
             append("\"status\":").append(json(tx.status)).append(",")
+            append("\"surplusSourcePrefs\":").append(json(tx.surplusSourcePrefs)).append(",")
             append("\"createdAt\":").append(tx.createdAt)
             append("}")
         }

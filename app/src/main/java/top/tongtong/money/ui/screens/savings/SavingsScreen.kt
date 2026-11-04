@@ -124,4 +124,5 @@ private fun typeLabel(type: SavingsType): String = when (type) {
     SavingsType.SURPLUS_ROLLOVER -> "结余结转"
     SavingsType.MONTHLY_QUOTA_ROLLOVER -> "月度配额结余"
     SavingsType.CROSS_FEE -> "跨类抵扣手续费"
+    SavingsType.SAME_FEE -> "同类抵扣手续费"
 }

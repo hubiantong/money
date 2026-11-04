@@ -15,8 +15,8 @@ android {
         applicationId = "top.tongtong.money"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.01"
+        versionCode = 2
+        versionName = "0.02"
         vectorDrawables { useSupportLibrary = true }
     }
 

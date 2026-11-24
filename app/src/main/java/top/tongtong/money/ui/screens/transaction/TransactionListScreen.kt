@@ -23,9 +23,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -53,185 +57,274 @@ fun TransactionListScreen(
         TransactionsViewModel(it, initialCategoryId, initialMonthKey)
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val calendar by viewModel.calendarState.collectAsStateWithLifecycle()
+    val calendarError = calendar.error
+    // 视图模式只影响展示，不重置月份、筛选或搜索
+    var showCalendar by rememberSaveable { mutableStateOf(false) }
     // 分类筛选只依赖分类快照，避免每次重组都重新过滤排序
     val visibleCategories = remember(state.categories) {
         state.categories.values.filter { !it.archived }.sortedBy { it.sortOrder }
     }
 
+    // 从结余来源跳回列表：清空原有查询与方向筛选，确保来源分类的记录可见
+    fun openSourceCategory(categoryId: Long) {
+        viewModel.setQuery("")
+        viewModel.setDirection(null)
+        viewModel.setCategory(categoryId)
+        showCalendar = false
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        Text(
-            text = "明细",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(start = 20.dp, top = 12.dp),
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 20.dp, top = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "明细",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.weight(1f),
+            )
+            FilterChip(
+                selected = !showCalendar,
+                onClick = { showCalendar = false },
+                label = { Text("列表") },
+            )
+            Spacer(Modifier.width(6.dp))
+            FilterChip(
+                selected = showCalendar,
+                onClick = { showCalendar = true },
+                label = { Text("日历") },
+            )
+        }
         MonthSwitcher(
             monthKey = state.monthKey,
             onShift = { viewModel.shiftMonth(it.toLong()) },
         )
 
-        OutlinedTextField(
-            value = state.query,
-            onValueChange = viewModel::setQuery,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-            placeholder = { Text("搜索商家 / 商品 / 备注", color = Muted) },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = Muted) },
-            trailingIcon = {
-                if (state.query.isNotEmpty()) {
-                    IconButton(onClick = { viewModel.setQuery("") }) {
-                        Icon(Icons.Filled.Close, contentDescription = "清除搜索", tint = Muted)
+        if (showCalendar) {
+            when {
+                calendarError != null -> LoadErrorCard(calendarError, viewModel::retry)
+                calendar.isLoading || calendar.monthKey != state.monthKey -> Text(
+                    text = "日历加载中…",
+                    color = Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                )
+                else -> LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(
+                        start = 20.dp,
+                        end = 20.dp,
+                        top = 4.dp,
+                        bottom = 24.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    item(key = "calendar") {
+                        CalendarCard(
+                            calendar = calendar,
+                            onSelectDate = viewModel::selectDate,
+                            onClearSelectedDate = viewModel::clearSelectedDate,
+                        )
                     }
-                }
-            },
-            singleLine = true,
-        )
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            MoneyCard(modifier = Modifier.weight(1f)) {
-                Text("支出", color = Muted, style = MaterialTheme.typography.labelMedium)
-                Text(
-                    text = formatCents(state.expenseCents),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Danger,
-                )
-            }
-            MoneyCard(modifier = Modifier.weight(1f)) {
-                Text("收入", color = Muted, style = MaterialTheme.typography.labelMedium)
-                Text(
-                    text = formatCents(state.incomeCents),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MintDark,
-                )
-            }
-            MoneyCard(modifier = Modifier.weight(1f)) {
-                Text("退款", color = Muted, style = MaterialTheme.typography.labelMedium)
-                Text(
-                    text = formatCents(state.refundCents),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MintDark,
-                )
-            }
-        }
-
-        Spacer(Modifier.height(10.dp))
-
-        Row(
-            modifier = Modifier
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FilterChip(
-                selected = state.direction == null,
-                onClick = { viewModel.setDirection(null) },
-                label = { Text("全部收支") },
-            )
-            listOf(
-                TxDirection.EXPENSE to "支出",
-                TxDirection.INCOME to "收入",
-                TxDirection.REFUND to "退款",
-            ).forEach { (direction, label) ->
-                FilterChip(
-                    selected = state.direction == direction,
-                    onClick = {
-                        viewModel.setDirection(if (state.direction == direction) null else direction)
-                    },
-                    label = { Text(label) },
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FilterChip(
-                selected = state.categoryId == null,
-                onClick = { viewModel.setCategory(null) },
-                label = { Text("全部分类") },
-            )
-            visibleCategories.forEach { category ->
-                FilterChip(
-                    selected = state.categoryId == category.id,
-                    onClick = {
-                        viewModel.setCategory(if (state.categoryId == category.id) null else category.id)
-                    },
-                    label = { Text("${category.emoji} ${category.name}") },
-                )
-            }
-        }
-
-        if (state.groups.isEmpty() && state.isLoading) {
-            Text(
-                text = "加载中…",
-                color = Muted,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(horizontal = 20.dp),
-            )
-        } else if (state.groups.isEmpty()) {
-            EmptyState("这个月还没有符合条件的记录", modifier = Modifier.weight(1f))
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                state.groups.forEach { group ->
-                    item(key = "day-${group.date}") {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 8.dp, bottom = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = group.label,
-                                style = MaterialTheme.typography.labelLarge,
-                                color = Muted,
-                                modifier = Modifier.weight(1f),
-                            )
-                            if (group.expenseCents > 0) {
-                                Text(
-                                    text = "支出 ${formatCents(group.expenseCents)}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = Muted,
-                                )
-                                Spacer(Modifier.width(8.dp))
-                            }
-                            if (group.incomeCents > 0) {
-                                Text(
-                                    text = "收入 ${formatCents(group.incomeCents)}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MintDark,
-                                )
-                                Spacer(Modifier.width(8.dp))
-                            }
-                            if (group.refundCents > 0) {
-                                Text(
-                                    text = "退款 ${formatCents(group.refundCents)}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MintDark,
-                                )
-                            }
-                        }
+                    item(key = "day-detail") {
+                        DayDetailPanel(
+                            visible = calendar.selectedDay != null,
+                            day = calendar.selectedDay,
+                            onCollapse = viewModel::clearSelectedDate,
+                            onOpenTransaction = onOpenTransaction,
+                            onOpenSourceCategory = { categoryId -> openSourceCategory(categoryId) },
+                        )
                     }
-                    items(group.transactions, key = { it.id }) { transaction ->
-                        TransactionRow(
-                            transaction = transaction,
-                            category = state.categories[transaction.categoryId],
-                            onClick = { onOpenTransaction(transaction.id) },
+                    item(key = "over-limit-overview") {
+                        OverLimitOverviewCard(
+                            overLimitDays = calendar.overLimitDays,
+                            onSelectDate = viewModel::selectDate,
+                            onOpenSourceCategory = { categoryId -> openSourceCategory(categoryId) },
                         )
                     }
                 }
             }
+        } else {
+            OutlinedTextField(
+                value = state.query,
+                onValueChange = viewModel::setQuery,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                placeholder = { Text("搜索商家 / 商品 / 备注", color = Muted) },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = Muted) },
+                trailingIcon = {
+                    if (state.query.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.setQuery("") }) {
+                            Icon(Icons.Filled.Close, contentDescription = "清除搜索", tint = Muted)
+                        }
+                    }
+                },
+                singleLine = true,
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                MoneyCard(modifier = Modifier.weight(1f)) {
+                    Text("支出", color = Muted, style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        text = formatCents(state.expenseCents),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Danger,
+                    )
+                }
+                MoneyCard(modifier = Modifier.weight(1f)) {
+                    Text("收入", color = Muted, style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        text = formatCents(state.incomeCents),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MintDark,
+                    )
+                }
+                MoneyCard(modifier = Modifier.weight(1f)) {
+                    Text("退款", color = Muted, style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        text = formatCents(state.refundCents),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MintDark,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = state.direction == null,
+                    onClick = { viewModel.setDirection(null) },
+                    label = { Text("全部收支") },
+                )
+                listOf(
+                    TxDirection.EXPENSE to "支出",
+                    TxDirection.INCOME to "收入",
+                    TxDirection.REFUND to "退款",
+                ).forEach { (direction, label) ->
+                    FilterChip(
+                        selected = state.direction == direction,
+                        onClick = {
+                            viewModel.setDirection(if (state.direction == direction) null else direction)
+                        },
+                        label = { Text(label) },
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = state.categoryId == null,
+                    onClick = { viewModel.setCategory(null) },
+                    label = { Text("全部分类") },
+                )
+                visibleCategories.forEach { category ->
+                    FilterChip(
+                        selected = state.categoryId == category.id,
+                        onClick = {
+                            viewModel.setCategory(if (state.categoryId == category.id) null else category.id)
+                        },
+                        label = { Text("${category.emoji} ${category.name}") },
+                    )
+                }
+            }
+
+            val listError = state.error
+            when {
+                listError != null -> LoadErrorCard(listError, viewModel::retry)
+                state.groups.isEmpty() && state.isLoading -> Text(
+                    text = "加载中…",
+                    color = Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                )
+                state.groups.isEmpty() -> EmptyState("这个月还没有符合条件的记录", modifier = Modifier.weight(1f))
+                else -> LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    state.groups.forEach { group ->
+                        item(key = "day-${group.date}") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp, bottom = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = group.label,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = Muted,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (group.expenseCents > 0) {
+                                    Text(
+                                        text = "支出 ${formatCents(group.expenseCents)}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = Muted,
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                }
+                                if (group.incomeCents > 0) {
+                                    Text(
+                                        text = "收入 ${formatCents(group.incomeCents)}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MintDark,
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                }
+                                if (group.refundCents > 0) {
+                                    Text(
+                                        text = "退款 ${formatCents(group.refundCents)}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MintDark,
+                                    )
+                                }
+                            }
+                        }
+                        items(group.transactions, key = { it.id }) { transaction ->
+                            TransactionRow(
+                                transaction = transaction,
+                                category = state.categories[transaction.categoryId],
+                                onClick = { onOpenTransaction(transaction.id) },
+                            )
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun LoadErrorCard(message: String, onRetry: () -> Unit) {
+    MoneyCard(modifier = Modifier.padding(horizontal = 20.dp)) {
+        Text(
+            text = message,
+            color = Danger,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(4.dp))
+        TextButton(onClick = onRetry) { Text("重试") }
     }
 }

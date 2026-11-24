@@ -154,6 +154,9 @@ interface PeriodBucketDao {
     @Query("SELECT * FROM period_buckets WHERE periodStart <= :at AND periodEnd > :at")
     fun observeActive(at: Long): Flow<List<PeriodBucketEntity>>
 
+    @Query("SELECT * FROM period_buckets WHERE monthKey = :monthKey ORDER BY periodStart ASC")
+    fun observeMonth(monthKey: String): Flow<List<PeriodBucketEntity>>
+
     @Query("SELECT * FROM period_buckets WHERE categoryId = :categoryId AND periodType = :periodType ORDER BY periodStart DESC LIMIT 1")
     fun observeLatest(categoryId: Long, periodType: PeriodType): Flow<PeriodBucketEntity?>
 
@@ -192,6 +195,9 @@ interface SurplusUsageDao {
 
     @Query("SELECT * FROM surplus_usages WHERE transactionId = :transactionId ORDER BY createdAt ASC")
     suspend fun forTransaction(transactionId: Long): List<SurplusUsageEntity>
+
+    @Query("SELECT * FROM surplus_usages WHERE monthKey = :monthKey ORDER BY transactionId ASC, createdAt ASC")
+    fun observeMonth(monthKey: String): Flow<List<SurplusUsageEntity>>
 }
 
 @Dao

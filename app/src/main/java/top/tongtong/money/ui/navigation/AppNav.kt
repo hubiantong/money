@@ -130,7 +130,13 @@ fun MoneyNavHost(container: AppContainer) {
                 StatsScreen(
                     container = container,
                     onOpenCategory = { categoryId, monthKey ->
-                        navController.navigate("transactions?categoryId=$categoryId&month=$monthKey")
+                        // 分类钻取 = 切到「明细」tab 并带上筛选参数。
+                        // 必须先 popUpTo 起始页：否则明细页会压在统计页之上，切 tab 时
+                        // saveState 会把明细页一起存进统计 tab 的返回栈，restoreState 恢复后
+                        // 栈顶仍是明细页，导致点击「统计」无法返回统计页。
+                        navController.navigate("transactions?categoryId=$categoryId&month=$monthKey") {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                        }
                     },
                 )
             }
